@@ -3184,6 +3184,15 @@ class HtmlRenderer {
             return !this.options.ignoreLastRenderedPageBreak;
         return elem.break == "page";
     }
+    hasRenderableContent(elem) {
+        if (elem.type == DomType.Text)
+            return !!elem.text;
+        if (elem.type == DomType.Break)
+            return false;
+        if (elem.children?.length)
+            return elem.children.some(c => this.hasRenderableContent(c));
+        return elem.type != DomType.Paragraph && elem.type != DomType.Run;
+    }
     isPageBreakSection(prev, next) {
         if (!prev)
             return false;
@@ -3228,15 +3237,21 @@ class HtmlRenderer {
                     let breakRun = p.children[pBreakIndex];
                     let splitRun = rBreakIndex < breakRun.children.length - 1;
                     if (pBreakIndex < p.children.length - 1 || splitRun) {
-                        var children = elem.children;
-                        var newParagraph = { ...elem, children: children.slice(pBreakIndex) };
-                        elem.children = children.slice(0, pBreakIndex);
+                        var children = p.children;
+                        var newParagraph = { ...p, children: children.slice(pBreakIndex) };
+                        p.children = children.slice(0, pBreakIndex);
                         current.elements.push(newParagraph);
                         if (splitRun) {
                             let runChildren = breakRun.children;
                             let newRun = { ...breakRun, children: runChildren.slice(0, rBreakIndex) };
-                            elem.children.push(newRun);
+                            p.children.push(newRun);
                             breakRun.children = runChildren.slice(rBreakIndex);
+                        }
+                        if (this.hasRenderableContent(p)) {
+                            newParagraph.suppressNumbering = true;
+                        }
+                        else {
+                            p.suppressNumbering = true;
                         }
                     }
                 }
@@ -3351,6 +3366,18 @@ section.${c}>footer { z-index: 1; }
         if (resetCounters.length > 0) {
             styleText += this.styleToString(this.rootSelector, {
                 "counter-reset": resetCounters.join(" ")
+            });
+        }
+        if (numberings.length > 0) {
+            const suppressedSelector = `p.${this.numberingSuppressedClass()}`;
+            styleText += this.styleToString(suppressedSelector, {
+                "counter-set": "none",
+                "counter-increment": "list-item 0",
+                "list-style-type": "none",
+            });
+            styleText += this.styleToString(`${suppressedSelector}:before`, {
+                "content": "none",
+                "counter-increment": "none",
             });
         }
         return [
@@ -3526,6 +3553,9 @@ section.${c}>footer { z-index: 1; }
         const numbering = elem.numbering ?? style?.paragraphProps?.numbering;
         if (numbering) {
             result.classList.add(this.numberingClass(numbering.id, numbering.level));
+            if (elem.suppressNumbering) {
+                result.classList.add(this.numberingSuppressedClass());
+            }
         }
         return result;
     }
@@ -3864,6 +3894,9 @@ section.${c}>footer { z-index: 1; }
         if (cssText)
             result += cssText;
         return result + "}\r\n";
+    }
+    numberingSuppressedClass() {
+        return `${this.className}-numbering-suppressed`;
     }
     numberingCounter(id, lvl) {
         return `${this.className}-num-${id}-${lvl}`;
